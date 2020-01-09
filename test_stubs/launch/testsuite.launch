@@ -1,0 +1,6 @@
+<launch>
+  <node name="im_publisher" pkg="test_stubs" type="im_publisher" args="~/test_image.png" />
+  <include file="/home/evan/catkin_ws/src/darknet_ros/darknet_ros/launch/darknet_ros.launch"/>
+  <node name="im_subscriber" pkg="test_stubs" type="im_subscriber" />
+  <node name="bb_subscriber" pkg="test_stubs" type="bb_subscriber" /> 
+</launch>
