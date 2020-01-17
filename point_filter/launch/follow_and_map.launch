@@ -1,0 +1,14 @@
+<launch>
+
+  <!-- Launch file for mapping -->
+  <include file="$(find beam_follower)/launch/include/ig_collect_scans.launch" />
+
+  <node pkg="beam_follower" type="person_detector_node" name="person_detector" output="screen">
+  </node>
+
+  <!-- Run controller node using just vision -->
+  <node pkg="beam_follower" type="robot_controller_node" name="robot_controller" output="screen">
+    <rosparam command="load" file="$(find beam_follower)/config/controller_config.yaml" />
+  </node>
+
+</launch>

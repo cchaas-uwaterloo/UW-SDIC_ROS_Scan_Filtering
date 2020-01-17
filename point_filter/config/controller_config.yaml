@@ -1,0 +1,7 @@
+# PD controller parameters
+p_x: 0.00002
+p_y: 0.00002
+d_x: 0.00001
+d_y: 0.00001
+bounding_box_topic: "/beam_follower/bounding_box"
+publish_topic: "/point_filter/filtered_cloud"

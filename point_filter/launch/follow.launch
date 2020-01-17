@@ -1,0 +1,21 @@
+<launch>
+
+  <!-- Start camera -->
+  <include file="$(find beam_follower)/launch/include/start_cam_F1.launch" />
+
+  <!-- Start velodyne drivers for horizontal and veritcal -->
+  <!-- <include file="$(find beam_follower)/launch/include/start_velodynes.launch" /> -->
+
+  <!-- Start husky base -->
+  <include file="$(find beam_follower)/launch/include/start_husky.launch" />
+
+  <node pkg="beam_follower" type="person_detector_node" name="person_detector" output="screen">
+    <rosparam command="load" file="$(find beam_follower)/config/controller_config.yaml" />
+  </node>
+
+  <!-- Run controller node using just vision -->
+  <node pkg="beam_follower" type="robot_controller_node" name="robot_controller" output="screen">
+    <rosparam command="load" file="$(find beam_follower)/config/controller_config.yaml" />
+  </node>
+
+</launch>

@@ -1,0 +1,14 @@
+<!--
+This launch file starts the velodne driver for both the horizontal (high res.)
+and the vertical lidar, plus runs the um7 & swiftnav gps drivers.
+  - This is for VLP 16 lidars
+  - Make sure the correct calibration files are included
+ -->
+
+<launch>
+  <node name="ig_start_scan" pkg="ig_collect_scans" type="start_scan.sh"
+    output="screen" args="$(find ig_collect_scans)/scripts"/>
+
+   <node name="ig_collect_bag" pkg="ig_collect_scans" type="collect_bag.sh"
+     output="screen" args="/home/robot/bag_files/ig_scans"/>
+</launch>
