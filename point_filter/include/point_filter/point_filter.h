@@ -77,61 +77,58 @@ private:
 
   ros::NodeHandle& nh_;      // ROS node handle.
   ros::NodeHandle nh_priv_;  // Private ROS node handle.
-  ros::Publisher publisher_; // ROS publisher for filtered cloud
+  ros::Publisher publisher_, publisher_test; // ROS publisher for filtered cloud
   beam_calibration::TfTree extrinsics_; // Robot extrinsics (pysical calibrations between sensors)
   std::shared_ptr<beam_calibration::CameraModel>
       intrinsics_; // camera intrinsics (internal camera calibrations)
   ros::Subscriber image_subscriber_, lidar_subscriber_,
       bounding_box_subscriber_, object_count_subscriber_;
-  std::string bounding_box_topic_, image_topic_, lidar_topic_, publish_topic_, object_count_topic_;
+  std::string bounding_box_topic_, image_topic_, lidar_topic_, publish_topic_, object_count_topic_, publish_topic_test_;
 
   PointCloud::Ptr scan_; //raw point cloud comming from LiDAR topic
-  PointCloud::Ptr cameraFrameScan_; //point cloud transformed to camera frame
 
+  PointCloud::Ptr filteredPoints_;
 
-  PointCloud::Ptr filteredScan_; //filtered point cloud with vehicles and people removed
-  sensor_msgs::PointCloud2 filteredScanOutput_; //filtered output converted to ROS message format
+  //PointCloud::Ptr filteredScan_; //filtered point cloud with vehicles and people removed
+  sensor_msgs::PointCloud2 scanOutput_; //filtered output converted to ROS message format
 
-  cv::Mat *imageCam0_;
-  cv::Mat *imageCam1_;
-  cv::Mat *imageCam2_;
-  cv::Mat *imageCam3_;
-  cv::Mat *imageCam4_;
-  cv::Mat *imageCam5_;
+  sensor_msgs::PointCloud2 filteredOutput_;
 
-  darknet_ros_msgs::BoundingBoxesConstPtr boundingBoxListCam0;
-  darknet_ros_msgs::BoundingBoxesConstPtr boundingBoxListCam1;
-  darknet_ros_msgs::BoundingBoxesConstPtr boundingBoxListCam2;
-  darknet_ros_msgs::BoundingBoxesConstPtr boundingBoxListCam3;
-  darknet_ros_msgs::BoundingBoxesConstPtr boundingBoxListCam4;
-  darknet_ros_msgs::BoundingBoxesConstPtr boundingBoxListCam5;
+  cv::Mat *imageCam_[6];
 
-  uint8_t  objectFoundCountCam0_;
-  uint8_t  objectFoundCountCam1_;
-  uint8_t  objectFoundCountCam2_;
-  uint8_t  objectFoundCountCam3_;
-  uint8_t  objectFoundCountCam4_;
-  uint8_t  objectFoundCountCam5_;
+  darknet_ros_msgs::BoundingBoxes boundingBoxListCam_[6];
+
+  uint8_t  objectFoundCountCam_[6];
+
 
   std::string lbLinkName_, lbCam0Name_, lbCam1Name_, lbCam2Name_, lbCam3Name_,
           lbCam4Name_, lbCam5Name_, lidarBaseName_;
+
+  uint8_t reading_camera_;
 
   /*test transform*/
   Eigen::Affine3d transform_TEST;
 
   /*
-  * @brief Transforms the raw point cloud in LiDAR reference frame to camers's reference frame
+  * @brief Transforms the raw point cloud in LiDAR reference frame to camera's reference frame
   * @params Takes raw point cloud data received via ROS Topic and enumerated camera to transform to
-  * @return Returns tranformed point cloud in camera's reference frame
+  * @return void
   */
-  PointCloud::Ptr transformToCameraFrame(const PointCloud::Ptr input_scan_, camera_t camera);
+  void transformToCameraFrame(const PointCloud::Ptr input_scan, PointCloud::Ptr out_scan, camera_t camera);
+
+  /*
+  * @brief Transforms the point cloud in the camera's reference frame back to the LiDAR reference frame
+  * @params Takes point cloud data in camera frame and enumerated camera to transform from
+  * @return void
+  */
+  void transformToLidarFrame(const PointCloud::Ptr input_scan, PointCloud::Ptr out_scan, camera_t camera);
 
   /*
   * @brief Filters out point cloud points identified as belonging to vehicles or other filterObjects
   * @params Takes point cloud data in camera's reference frame
   * @return filtered point cloud
   */
-  void filterObjects(const PointCloud::Ptr input_scan_, camera_t camera);
+  PointCloud::Ptr filterObjects(PointCloud::Ptr input_scan_, camera_t camera);
 
   /*
   * @Test

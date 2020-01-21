@@ -17,7 +17,7 @@ pcl::visualization::PCLVisualizer::Ptr simpleVis (pcl::PointCloud<pcl::PointXYZ>
   pcl::visualization::PCLVisualizer::Ptr viewer (new pcl::visualization::PCLVisualizer ("Output Points"));
   viewer->setBackgroundColor (0, 0, 0);
   viewer->addPointCloud (cloud, "sample cloud");
-  viewer->setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "sample cloud");
+  viewer->setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "sample cloud");
   viewer->addCoordinateSystem (1);
   return (viewer);
 }
@@ -38,6 +38,14 @@ void pclCallback(const sensor_msgs::PointCloud2& pcl_msg) {
     visualizer_started = true;
   }
 
+  ROS_INFO("writing point cloud to file");
+
+  //get message header with timestamp
+  std_msgs::Header h = pcl_msg.header;
+  std::string timestamp = std::to_string(h.stamp.sec);
+  std::string path = "/home/evan/test_scans/s_" + timestamp + ".pcd";
+  pcl::io::savePCDFileASCII (path, *basic_cloud_ptr);
+
 }
 
 int main(int argc, char **argv)
@@ -45,7 +53,7 @@ int main(int argc, char **argv)
 
   ros::init(argc, argv, "pcl_subscriber");
   ros::NodeHandle nh;
-  ros::Subscriber sub = nh.subscribe("/test_filtered_cloud_inverse", 1, pclCallback);
+  ros::Subscriber sub = nh.subscribe("/front/velodyne_points", 1, pclCallback);
   ros::spin();
 
   //visualizer_thread_template.join();

@@ -26,6 +26,11 @@ add_executable(im_publisher src/im_publisher.cpp)
 add_dependencies(im_publisher ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(im_publisher ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 
+# add the image publisher
+add_executable(im_publisher_rr src/im_publisher_rr.cpp)
+add_dependencies(im_publisher_rr ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_link_libraries(im_publisher_rr ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+
 # add the image subscriber
 add_executable(im_subscriber src/im_subscriber.cpp)
 add_dependencies(im_subscriber ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
@@ -50,6 +55,16 @@ target_link_libraries(pcl_subscriber ${catkin_LIBRARIES} beam::beam)
 add_executable(test_bag_reader src/test_bag_reader.cpp)
 add_dependencies(test_bag_reader ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(test_bag_reader ${catkin_LIBRARIES} beam::beam)
+
+# add the test scan reader
+add_executable(test_scan_reader src/test_scan_reader.cpp)
+add_dependencies(test_scan_reader ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_link_libraries(test_scan_reader ${catkin_LIBRARIES} beam::beam)
+
+# add the pcl from file publisher
+add_executable(pclFile_publisher src/pclFile_publisher.cpp)
+add_dependencies(pclFile_publisher ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_link_libraries(pclFile_publisher ${catkin_LIBRARIES} beam::beam)
 
 # Mark executables and/or libraries for installation
 install(TARGETS im_publisher im_subscriber bb_subscriber

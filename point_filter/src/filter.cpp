@@ -9,15 +9,17 @@ PointFilter::PointFilter(ros::NodeHandle& node_handle)
   //might want to advertise on the public handle of the node (use nh_ rather than nh_priv_)
   publisher_ = nh_priv_.advertise<sensor_msgs::PointCloud2>(publish_topic_, 1);
 
+  publisher_test = nh_priv_.advertise<sensor_msgs::PointCloud2>(publish_topic_test_, 1);
+
   bool load_intr = LoadIntrinsics();
   bool load_extr = LoadExtrinsics();
 
-  objectFoundCountCam0_ = 0;
-  objectFoundCountCam1_ = 0;
-  objectFoundCountCam2_ = 0;
-  objectFoundCountCam3_ = 0;
-  objectFoundCountCam4_ = 0;
-  objectFoundCountCam5_ = 0;
+  objectFoundCountCam_[0] = 0;
+  objectFoundCountCam_[1] = 0;
+  objectFoundCountCam_[2] = 0;
+  objectFoundCountCam_[3] = 0;
+  objectFoundCountCam_[4] = 0;
+  objectFoundCountCam_[5] = 0;
 
   lbLinkName_ = "ladybug_link";
   lbCam0Name_ = "ladybug_cam0";
@@ -27,6 +29,9 @@ PointFilter::PointFilter(ros::NodeHandle& node_handle)
   lbCam4Name_ = "ladybug_cam4";
   lbCam5Name_ = "ladybug_cam5";
   lidarBaseName_ = "m3d_link";
+
+  reading_camera_ = 0;
+
 
   bounding_box_subscriber_ = nh_.subscribe(bounding_box_topic_, 1,
                               &PointFilter::BoundingBoxCallback, this);
@@ -49,13 +54,19 @@ PointFilter::PointFilter(ros::NodeHandle& node_handle)
 bool PointFilter::ReadParameters() {
 
   nh_priv_.param<std::string>("bounding_box_topic", bounding_box_topic_,
-                              "/bounding_box");
+                              "/darknet_ros/bounding_boxes");
+  nh_priv_.param<std::string>("object_count_topic", object_count_topic_,
+                              "/darknet_ros/found_object");
   nh_priv_.param<std::string>("publish_topic", publish_topic_,
-                              "/filtered_cloud");
+                              "/test_filtered_cloud");
   nh_priv_.param<std::string>("image_topic", image_topic_,
                               "/F1/image_raw");
   nh_priv_.param<std::string>("lidar_topic", lidar_topic_,
                               "/test_pcl_topic");
+
+  //@TEST
+  nh_priv_.param<std::string>("publish_topic_test", publish_topic_test_,
+                              "/test_filtered_cloud_inverse");
 
   ROS_INFO("bounding_box_topic: %s", bounding_box_topic_.c_str());
   ROS_INFO("publish_topic: %s", publish_topic_.c_str());
@@ -85,65 +96,57 @@ bool PointFilter::LoadExtrinsics() {
 /***********************Callback Functions********************************/
 
 void PointFilter::ImageCallback(const sensor_msgs::Image& image_msg) {
-  *imageCam0_ = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8)->image;
+  *imageCam_[reading_camera_] = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8)->image;
+  reading_camera_++;
+  if (reading_camera_ == 6)
+    reading_camera_ = 0;
 }
 
 void PointFilter::LidarCallback(
     const sensor_msgs::PointCloud2& lidar_msg) {
 
-  //@TEST
-  ROS_INFO("Reading pcl.");
-
   //convert ROS message to point cloud type
   PointCloud2::Ptr  scan_tmp_ (new PointCloud2);
   pcl_conversions::toPCL(lidar_msg, *scan_tmp_);
   scan_ = boost::make_shared<PointCloud>();
+  filteredPoints_ = boost::make_shared<PointCloud>();
   pcl::fromPCLPointCloud2(*scan_tmp_, *scan_);
 
-  //@TEST
-  ROS_INFO("successfully converted pcl ROS message to point cloud");
-
-  //Transform raw lidar scan to all camera frames and filter in each frame
-  cameraFrameScan_ = boost::make_shared<PointCloud>();
-
-  for (int i=camera_t::lblink; i < camera_t::lbcam0; i++) {
-
+  for (int i=camera_t::lbcam0; i < camera_t::lbcam5; i++) {
     //@TEST
-    ROS_INFO ("Ran transform loop with camera %d", (int)i);
-    cameraFrameScan_ = transformToCameraFrame(scan_,(camera_t)i);
+    ROS_INFO ("Ran transform loop with camera %d", (int)i -1);
 
-    //filterObjects(cameraFrameScan_,i);
-    //@TEST
-    testProjection(cameraFrameScan_,(camera_t)i);
+    scan_ = filterObjects(scan_,(camera_t)i);
   }
 
-  //@TEST
-  ROS_INFO("successfully transformed to camera frame");
-  sensor_msgs::PointCloud2 cameraFrameScanTESTOutput_;
-  pcl::toROSMsg(*cameraFrameScan_, cameraFrameScanTESTOutput_);
+  pcl::toROSMsg(*scan_, scanOutput_);
 
-  publisher_.publish(cameraFrameScanTESTOutput_);
+  pcl::toROSMsg(*filteredPoints_, filteredOutput_);
+
+  publisher_.publish(scanOutput_);
+  publisher_test.publish(filteredOutput_);
 }
 
-void PointFilter::BoundingBoxCallback(
-    const darknet_ros_msgs::BoundingBoxesConstPtr& bounding_box_msg) {
-      boundingBoxListCam0 = bounding_box_msg;
+void PointFilter::BoundingBoxCallback(const darknet_ros_msgs::BoundingBoxesConstPtr& bounding_box_msg) {
+  boundingBoxListCam_[reading_camera_] = *bounding_box_msg;
+  reading_camera_++;
+  if (reading_camera_ == 6)
+    reading_camera_ = 0;
 }
 
 void PointFilter::ObjectCountCallback(const darknet_ros_msgs::ObjectCountConstPtr& msg) {
-  objectFoundCountCam0_ = msg->count;
+  objectFoundCountCam_[reading_camera_] = msg->count;
+  reading_camera_++;
+  if (reading_camera_ == 6)
+    reading_camera_ = 0;
 }
 
 
 /**************************helper functions**********************************/
 
-PointCloud::Ptr PointFilter::transformToCameraFrame(const PointCloud::Ptr input_scan_,camera_t camera) {
+void PointFilter::transformToCameraFrame(const PointCloud::Ptr input_scan, PointCloud::Ptr out_scan,camera_t camera) {
 
-  PointCloud::Ptr out_cloud;
   Eigen::Affine3d transform;
-
-  out_cloud = boost::make_shared<PointCloud>();
-
 
   if (camera == camera_t::lblink) {
     transform = extrinsics_.GetTransformEigen(lbLinkName_,lidarBaseName_);
@@ -171,21 +174,72 @@ PointCloud::Ptr PointFilter::transformToCameraFrame(const PointCloud::Ptr input_
     transform = transform_TEST;
   }
 
-  pcl::transformPointCloud(*input_scan_, *out_cloud, transform); //(cloud_in, cloud_out, transform)
-
-  return out_cloud;
+  pcl::transformPointCloud(*input_scan, *out_scan, transform); //(cloud_in, cloud_out, transform)
 
 }
 
-//@TODO Update this function for different images, boundingBox lists and object counts
-void PointFilter::filterObjects(const PointCloud::Ptr input_scan_, camera_t camera) {
+void PointFilter::transformToLidarFrame(const PointCloud::Ptr input_scan, PointCloud::Ptr out_scan,camera_t camera) {
+
+  Eigen::Affine3d transform;
+
+  if (camera == camera_t::lblink) {
+    transform = extrinsics_.GetTransformEigen(lbLinkName_,lidarBaseName_);
+  }
+  else if (camera == camera_t::lbcam0) {
+    transform = extrinsics_.GetTransformEigen(lbCam0Name_,lidarBaseName_);
+  }
+  else if (camera == camera_t::lbcam1) {
+    transform = extrinsics_.GetTransformEigen(lbCam1Name_,lidarBaseName_);
+  }
+  else if (camera == camera_t::lbcam2) {
+    transform = extrinsics_.GetTransformEigen(lbCam2Name_,lidarBaseName_);
+  }
+  else if (camera == camera_t::lbcam3) {
+    transform = extrinsics_.GetTransformEigen(lbCam3Name_,lidarBaseName_);
+  }
+  else if (camera == camera_t::lbcam4) {
+    transform = extrinsics_.GetTransformEigen(lbCam4Name_,lidarBaseName_);
+  }
+  else if (camera == camera_t::lbcam5) {
+    transform = extrinsics_.GetTransformEigen(lbCam5Name_,lidarBaseName_);
+  }
+  else if (camera == camera_t::lbtest) {
+    transform_TEST.translation() << 0, 0, 0;
+    transform = transform_TEST;
+  }
+
+  transform = transform.inverse();
+
+  pcl::transformPointCloud(*input_scan, *out_scan, transform); //(cloud_in, cloud_out, transform)
+
+}
+
+PointCloud::Ptr PointFilter::filterObjects(PointCloud::Ptr input_scan_, camera_t camera) {
+
+  //set camera variables based on camera param
+  uint16_t vmax = imageCam_[(int)camera - 1]->rows;
+  uint16_t umax = imageCam_[(int)camera - 1]->cols;
+  darknet_ros_msgs::BoundingBoxes bbList = boundingBoxListCam_[(int)camera - 1];
+  uint8_t oFCount = objectFoundCountCam_[(int)camera - 1];
+
+  PointCloud::Ptr cameraFrameScan_ = boost::make_shared<PointCloud>();
+  PointCloud::Ptr filteredScanCamera_ = boost::make_shared<PointCloud>();
+  PointCloud::Ptr filteredScanLidar_ = boost::make_shared<PointCloud>();
+
+  //@TEST
+  PointCloud::Ptr filteredCameraPoints_ = boost::make_shared<PointCloud>();
+
+  //make a copy of the input scan in the camera frame
+  transformToCameraFrame(input_scan_, cameraFrameScan_, camera);
+
+  transformToCameraFrame(filteredPoints_, filteredCameraPoints_, camera);
 
   beam::Vec2 coords;
   beam::Vec3 point;
   uint16_t u, v;
-  uint16_t vmax = imageCam0_->rows;
-  uint16_t umax = imageCam0_->cols;
-  filteredScan_ = boost::make_shared<PointCloud>();
+
+  bool behind_plane = false;
+  bool beyond_plane = false;
 
   for (uint32_t i = 0; i < cameraFrameScan_->points.size(); i++) {
 
@@ -193,9 +247,12 @@ void PointFilter::filterObjects(const PointCloud::Ptr input_scan_, camera_t came
     point(1, 0) = cameraFrameScan_->points[i].y;
     point(2, 0) = cameraFrameScan_->points[i].z;
 
+    behind_plane = false;
+    beyond_plane = false;
+
     //check that the point is not behind the image plane
     if (point(2,0) < 0)
-      continue;
+      behind_plane = true;
 
     //project the point to the image plane
     coords = intrinsics_->ProjectPoint(point);
@@ -205,27 +262,34 @@ void PointFilter::filterObjects(const PointCloud::Ptr input_scan_, camera_t came
 
     //check if the point is beyond the edges of the image
     if (u < 0 || v < 0 || u > umax || v > vmax)
-      continue;
+      beyond_plane = true;
 
     bool filterPoint = false;
 
     //check if the point is within a bounding box
-    for (uint8_t j = 0; j < objectFoundCountCam0_; j++) {
-      if (boundingBoxListCam0 = NULL)
-        continue;
-      if (u > boundingBoxListCam0->bounding_boxes[j].xmin && u < boundingBoxListCam0->bounding_boxes[j].xmax &&
-          v > boundingBoxListCam0->bounding_boxes[j].ymin && v < boundingBoxListCam0->bounding_boxes[j].ymax)
-          filterPoint = true;
+    for (uint8_t j = 0; j < oFCount; j++) {
+
+      if (u > bbList.bounding_boxes[j].xmin && u < bbList.bounding_boxes[j].xmax &&
+          v > bbList.bounding_boxes[j].ymin && v < bbList.bounding_boxes[j].ymax) {
+            filterPoint = true;
+            ROS_INFO("Filtered point from car %d", j);
+          }
+
     }
 
-    //if the point is not in any bounding boxes, push it to filtered point cloud
-    if (!filterPoint)
-      filteredScan_->push_back(cameraFrameScan_->points[i]);
-    }
+      //if the point is not in any bounding boxes, push it to filtered point cloud
+      if (!filterPoint || behind_plane || beyond_plane)
+        filteredScanCamera_->push_back(cameraFrameScan_->points[i]);
+      else
+        filteredCameraPoints_->push_back(cameraFrameScan_->points[i]);
+  }
 
-    //@ note will need to transform camera's filtered scan back into the lidar frame before writing to a common filtered scan in that frame of reference
+  //transform the filtered scan in the camera frame back to the lidar frame
+  transformToLidarFrame(filteredScanCamera_, filteredScanLidar_, camera);
 
-    pcl::toROSMsg(*filteredScan_, filteredScanOutput_);
+  transformToLidarFrame(filteredCameraPoints_, filteredPoints_, camera);
+
+  return (filteredScanLidar_);
 
 }
 
