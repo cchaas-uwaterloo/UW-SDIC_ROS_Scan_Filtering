@@ -17,6 +17,7 @@ find_package(beam REQUIRED)
 find_package(catkin REQUIRED
   COMPONENTS
     ${build_depends}
+    image_transport
 )
 
 find_package(OpenCV REQUIRED)
@@ -30,6 +31,7 @@ catkin_package(
     ${PROJECT_NAME}
   CATKIN_DEPENDS
     ${build_depends}
+    image_transport
 )
 
 # Core library
@@ -63,10 +65,15 @@ target_link_libraries(${PROJECT_NAME}
 ##################################
 
 
-# add the point_filter_noe
+# add the point_filter_node
 add_executable(point_filter_node src/point_filter_node.cpp)
 add_dependencies(point_filter_node ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(point_filter_node ${catkin_LIBRARIES} ${OpenCV_LIBRARIES} ${PROJECT_NAME})
+
+# add the point_filter_buffer
+add_executable(point_filter_buffer src/point_filter_buffer.cpp)
+add_dependencies(point_filter_buffer ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_link_libraries(point_filter_buffer ${catkin_LIBRARIES} ${OpenCV_LIBRARIES} ${PROJECT_NAME})
 
 
 # Mark executables and/or libraries for installation

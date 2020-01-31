@@ -146,13 +146,14 @@ private:
 
   ros::NodeHandle& nh_;                                                         // ROS node handle.
   ros::NodeHandle nh_priv_;                                                     // Private ROS node handle.
-  ros::Publisher publisher_, publisher_test, publisher_ack_;                    // ROS publishers
+  ros::Publisher publisher_, publisher_test, publisher_ack_,                    // ROS publishers
+                 publisher_pclack_;
   ros::Subscriber image_subscriber_, lidar_subscriber_,                         // ROS subscribers
                   bounding_box_subscriber_, object_count_subscriber_,
                   camera_number_subscriber_;
   std::string bounding_box_topic_, image_topic_, lidar_topic_,                  // ROS topic names
               publish_topic_, object_count_topic_, publish_topic_test_,
-              camera_number_topic_, publish_ack_topic_;
+              camera_number_topic_, publish_ack_topic_, publish_pclack_topic_;
 
   beam_calibration::TfTree extrinsics_;                                         // Robot extrinsics (pysical calibrations between sensors)
   std::shared_ptr<beam_calibration::CameraModel> intrinsics_[NUM_CAMERAS];      // Camera intrinsics (internal camera calibrations)
@@ -178,7 +179,7 @@ private:
   std::string lbLinkName_, lbCam0Name_, lbCam1Name_, lbCam2Name_, lbCam3Name_,  // Coordinate frame names corresponding to the tfTree transforms
               lbCam4Name_, lbCam5Name_, lidarBaseName_;
 
-  bool firstImage_;
+  uint8_t firstImages_;                                                         // Used to discard the first two images provided by darknet on initialization
 
 
   //**************************************************************************//
