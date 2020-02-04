@@ -68,32 +68,41 @@ The topics described below are default values, they can be modified in the confi
 **Subscribed topics:** 
 
 /ladybug/camera0/image_color/compressed [sensor_msgs/CompressedImage]
+
     ladybug camera 0 image topic
 
 /ladybug/camera1/image_color/compressed [sensor_msgs/CompressedImage]
+
     ladybug camera 1 image topic
 
 /ladybug/camera2/image_color/compressed [sensor_msgs/CompressedImage]
+
     ladybug camera 2 image topic
 
 /ladybug/camera3/image_color/compressed [sensor_msgs/CompressedImage]
+
     ladybug camera 3 image topic
 
 /ladybug/camera4/image_color/compressed [sensor_msgs/CompressedImage]
+
     ladybug camera 4 image topic
 
 /ladybug/camera5/image_color/compressed [sensor_msgs/CompressedImage]
+
     ladybug camera 5 image topic
 
 /front/velodyne_points [sensor_msgs/PointCloud2]
+
     LiDAR raw point cloud topic
 
 **Published topics**
 
 /publish_filtered_topic [sensor_msgs/PointCloud2]
+
     filtered point cloud topic with unwanted objects removed
 
 /publish_original_topic [sensor_msgs/PointCloud2]
+
     original unfiltered point cloud topic 
 
 Further topics for communication between the two point_filter nodes and darknet_ros can be viewed and modified in the config.yaml file.
@@ -101,21 +110,25 @@ Further topics for communication between the two point_filter nodes and darknet_
 ## Outstanding issues
 
 **Issue:** Images processed by darknet at low rate 
+
 **Description:** Running on the NVIDIA GPU, darknet is capable of processing images at around 20 fps. However, in the current configuration
                  images are sent to darknet and processed at around 1 fps. This is likely due to the publishing and acknowledgement protocols
                  running in the point_filter nodes. Optimizing this process to fully exploit the speeds that darknet is capable of would 
                  significantly speed up filtering process. 
 
 **Issue** Darknet unable to identify vehicles in consecutive images
+
 **Description:** Likely due to poor lighting conditions, darknet is sometimes unable to identify a vehicle in many consective images and these 
                  vehicles are not filtered from the corresponding scans. 
 
 **Issue** Pillars in front of vehicles filtered from scans 
+
 **Description:** When darknet identifies a vehicle behind a pillar or other structural element, a bounding bow is provided around the vehicle and 
                  the pillar in the image. This causes the filter node to remove the pillar from that scan. If the pillar is filtered from enough
                  scans, it could be removed from the final map of the structure. 
 
 **Issue** Inaccurate extrinsic calibrations between LiDAR and camera frames
+
 **Description:** From a visual inspection, the calibrations between the LiDAR frame and the cameras seems to be off by several degrees about the z
                  axis (upward from the robot). This results in areas of filtering that are just slightly offset from the object to be filtered despite
                  a good bounding box fit provided by darknet. These extrinsic calibrations likely change with the configuration of the robot and those 
