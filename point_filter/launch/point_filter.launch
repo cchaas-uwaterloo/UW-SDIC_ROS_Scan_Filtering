@@ -1,0 +1,12 @@
+<launch>
+
+  <node pkg="point_filter" type="point_filter_node" name="point_filter_node" output="screen" >
+  </node>
+
+  <!-- Launch file for mapping -->
+  <include file="$(find point_filter)/launch/include/darknet_ros.launch" />
+
+  <node pkg="point_filter" type="point_filter_buffer" name="point_filter_buffer" args="_image_transport:=compressed" output="screen">
+  </node>
+
+</launch>

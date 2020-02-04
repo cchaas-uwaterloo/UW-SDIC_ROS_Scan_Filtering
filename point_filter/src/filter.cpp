@@ -2,20 +2,27 @@
 
 namespace point_filter {
 
+//****************************************************************************//
+//*******************************SETUP FUNCTIONS******************************//
+//****************************************************************************//
+
 PointFilter::PointFilter(ros::NodeHandle& node_handle)
     : nh_(node_handle), nh_priv_("~") {
   if (!ReadParameters()) { ROS_ERROR("Error reading ROS parameters"); }
 
-  publisher_ = nh_priv_.advertise<sensor_msgs::PointCloud2>(publish_topic_, 1);
+  // Advertise publishing topics
 
+  publisher_ = nh_priv_.advertise<sensor_msgs::PointCloud2>(publish_topic_, 1);
   publisher_ack_ = nh_priv_.advertise<std_msgs::Int16>(publish_ack_topic_, 1);
   publisher_pclack_ = nh_priv_.advertise<std_msgs::Int16>(publish_pclack_topic_, 1);
+  publisher_original_ = nh_priv_.advertise<sensor_msgs::PointCloud2>(publish_original_topic_, 1);
 
-  //@TEST
-  publisher_test = nh_priv_.advertise<sensor_msgs::PointCloud2>(publish_topic_test_, 1);
+  // Load calibrations from config files
 
   bool load_intr = LoadIntrinsics();
   bool load_extr = LoadExtrinsics();
+
+  // Initialize class member variables
 
   objectFoundCountCam_[0] = 0;
   objectFoundCountCam_[1] = 0;
@@ -37,8 +44,10 @@ PointFilter::PointFilter(ros::NodeHandle& node_handle)
   ack_m.data = 1;
   imageSem_ = 0;
   filterIntensity_ = 1.5;
-  acknowledgeSent = true;
+  acknowledgeSent_ = true;
   firstImages_ = 2;
+
+  // Initialize subscribers with respective callback functions
 
   bounding_box_subscriber_ = nh_.subscribe(bounding_box_topic_, 1,
                               &PointFilter::BoundingBoxCallback, this);
@@ -48,7 +57,6 @@ PointFilter::PointFilter(ros::NodeHandle& node_handle)
                               &PointFilter::ImageCallback, this);
   lidar_subscriber_ = nh_.subscribe(lidar_topic_, 1,
                               &PointFilter::LidarCallback, this);
-
   camera_number_subscriber_ = nh_.subscribe(camera_number_topic_, 1,
                               &PointFilter::CameraNumberCallback, this);
 
@@ -57,37 +65,50 @@ PointFilter::PointFilter(ros::NodeHandle& node_handle)
 
 bool PointFilter::ReadParameters() {
 
-  nh_priv_.param<std::string>("bounding_box_topic", bounding_box_topic_,
+  // Set topic names based on config variables
+
+  nh_priv_.param<std::string>("/bounding_box_topic", bounding_box_topic_,
                               "/darknet_ros/bounding_boxes");
-  nh_priv_.param<std::string>("object_count_topic", object_count_topic_,
+  nh_priv_.param<std::string>("/object_count_topic", object_count_topic_,
                               "/darknet_ros/found_object");
-  nh_priv_.param<std::string>("publish_topic", publish_topic_,
-                              "/test_filtered_cloud");
   nh_priv_.param<std::string>("image_topic", image_topic_,
                               "/darknet_ros/detection_image");
+
   nh_priv_.param<std::string>("lidar_topic", lidar_topic_,
                               "/point_cloud");
-
   nh_priv_.param<std::string>("camera_number_topic", camera_number_topic_,
                               "/camera_number");
-  nh_priv_.param<std::string>("publish_ack_topic", publish_ack_topic_,
+  nh_priv_.param<std::string>("acknowledge_topic", publish_ack_topic_,
                               "/camera_acknowledge");
-  nh_priv_.param<std::string>("publish_pclack_topic", publish_pclack_topic_,
+  nh_priv_.param<std::string>("pcl_acknowledge_topic", publish_pclack_topic_,
                               "/pcl_acknowledge");
 
+  nh_priv_.param<std::string>("publishers/filtered_cloud/topic", publish_topic_,
+                              "/publish_filtered_topic");
+  nh_priv_.param<std::string>("publishers/original_cloud/topic", publish_original_topic_,
+                              "/publish_original_topic");
 
-  nh_priv_.param<std::string>("publish_topic_test", publish_topic_test_,
-                              "/test_original_cloud");
 
-  ROS_INFO("bounding_box_topic: %s", bounding_box_topic_.c_str());
-  ROS_INFO("publish_topic: %s", publish_topic_.c_str());
+
+  // Write topic names to console
+
+  ROS_INFO("publish_filtered_topic: %s", publish_topic_.c_str());
+  ROS_INFO("publish_original_topic: %s", publish_original_topic_.c_str());
   ROS_INFO("publish_ack_topic: %s", publish_ack_topic_.c_str());
+  ROS_INFO("publish_pclack_topic: %s", publish_pclack_topic_.c_str());
   ROS_INFO("image_topic: %s", image_topic_.c_str());
   ROS_INFO("lidar_topic: %s", lidar_topic_.c_str());
+  ROS_INFO("bounding_box_topic: %s", bounding_box_topic_.c_str());
+  ROS_INFO("object_count_topic: %s", object_count_topic_.c_str());
+  ROS_INFO("camera_number_topic: %s", camera_number_topic_.c_str());
   return true;
 }
 
 bool PointFilter::LoadIntrinsics() {
+
+  // Load Ladybug camera model intrinsic calibration params for each camera from
+  // config file
+
   std::string file_location = __FILE__;
   file_location.erase(file_location.end() - 28, file_location.end());
   file_location += "/point_filter/config/ladybug.conf";
@@ -101,24 +122,49 @@ bool PointFilter::LoadIntrinsics() {
 }
 
 bool PointFilter::LoadExtrinsics() {
+
+  // Load extrinsic transforms between sensor frames from config file
+
   std::string file_location = __FILE__;
   file_location.erase(file_location.end() - 28, file_location.end());
   file_location += "/point_filter/config/Extrinsics.json";
   ROS_INFO("Openning Extrinsics: %s", file_location.c_str());
   extrinsics_.LoadJSON(file_location);
+
   return true;
 }
 
-/***********************Callback Functions********************************/
+//****************************************************************************//
+//*****************************CALLBACK FUNCTIONS*****************************//
+//****************************************************************************//
 
 void PointFilter::ImageCallback(const sensor_msgs::Image& image_msg) {
+
+  /*
+   * @INFO Load the received image to the current image array based on the
+   *       the current camera info being read if the following conditions are
+   *       met:
+   *       1. The received image is different from the last image received. This
+   *          is required because darknet publishes periodically at a consistent
+   *          rate regardless of whether it has finished processing a new image
+   *       2. The received image is not on of the first two published by darknet
+   *          as these are consistently junk
+   *      Once the image is loaded to the current image array, tell the bb and
+   *      object count subscribers to expect new data associated with this image
+   *      by incrementing the image semaphore. Also reset the acknowledge Sent
+   *      flag so the image data can be acknowledged once it is all received.
+   *      The last received image is also reset for the next comparison.
+
+   *      If the previous conditions fail, update the last image received and
+   *      decrement the first image counter if required.
+   */
 
   if (!imageIsEqual(cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8)->image,lastImage_) && firstImages_ == 0 ) {
     ROS_INFO("Loading camera %d", reading_camera_);
     imageCam_[reading_camera_] = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8)->image;
     lastImage_ = imageCam_[reading_camera_];
     imageSem_ = 2;
-    acknowledgeSent = false;
+    acknowledgeSent_ = false;
   }
   else {
     ROS_INFO("discarded image read");
@@ -133,15 +179,26 @@ void PointFilter::ImageCallback(const sensor_msgs::Image& image_msg) {
 void PointFilter::LidarCallback(
     const sensor_msgs::PointCloud2& lidar_msg) {
 
-  //save the header of the input cloud to write back to the output cloud
+  // Save the header of the input cloud to write back to the output cloud
+
   std_msgs::Header inputCloudHeader = lidar_msg.header;
 
-  //convert ROS message to point cloud type
+  // Convert ROS message to point cloud type
+
   PointCloud2::Ptr  scan_tmp_ (new PointCloud2);
   pcl_conversions::toPCL(lidar_msg, *scan_tmp_);
   scan_ = boost::make_shared<PointCloud>();
-  filteredScanLidarInv_ = boost::make_shared<PointCloud>();
   pcl::fromPCLPointCloud2(*scan_tmp_, *scan_);
+
+  /*
+   * @INFO Push the raw scan through the filtering function with each camera
+   *       successively. This process is fairly slow so the whole lidar
+   *       callback function must run in its own thread to prevent it from
+   *       excesively blocking the remaining callbacks (this shouldn't matter
+   *       at the moment since the buffer waits to publish new images until
+   *       the filtering is finished, but processing times could be reduced
+   *       by removing that condition in the future).
+   */
 
   for (int i=camera_t::lbcam0; i <= camera_t::lbcam5; i++) {
     ROS_INFO("Filtering on camera %d", i-1);
@@ -150,61 +207,108 @@ void PointFilter::LidarCallback(
 
   pcl::toROSMsg(*scan_, scanOutput_);
 
-  pcl::toROSMsg(*filteredScanLidarInv_, scanOutputInv_);
+  // Write the header information from the input cloud to the ouput cloud to
+  // conserve the timestamp of the original cloud message
 
-  //write the header information from the input cloud to the ouput cloud
   scanOutput_.header = inputCloudHeader;
 
   publisher_.publish(scanOutput_);
-  publisher_test.publish(lidar_msg);
+  publisher_original_.publish(lidar_msg);
 
-  //acknowledge pcl filtered to point cloud buffer (prompts to send )
+  // acknowledge pcl filtered to point cloud buffer (prompts to being publishing
+  // images for the next point cloud)
+
   publisher_pclack_.publish(ack_m);
   ROS_INFO("Sent PCL processed acknowledgement");
 }
 
 void PointFilter::BoundingBoxCallback(const darknet_ros_msgs::BoundingBoxesConstPtr& bounding_box_msg) {
+
+  /*
+   * @INFO Load the received bb list to the current bb list array to the
+   *       the current camera info being read if the image semaphore has been
+   *       incremented by the image callback function (indicating a new image has been
+   *       recieved from darknet and the corresponding detection data must be read).
+   *       If the bb list data is new, the image semaphore is decremented to
+   *       indicate that it has now been read.
+   *       If bb list was the last data to be recieved for the current image
+   *       (the image semaphore = 0) and the data recieved acknowledgement has not
+   *       been sent already, do so and set the acknowledge sent flag so it will
+   *       not be sent again until a new image is received from darknet.
+   */
+
   if (imageSem_ > 0) {
     if (bounding_box_msg != NULL)
       boundingBoxListCam_[reading_camera_] = *bounding_box_msg;
     ROS_INFO("Loaded bounding boxes from camera %d", reading_camera_);
     imageSem_ --;
   }
-  if (imageSem_ == 0 && !acknowledgeSent) {
+  if (imageSem_ == 0 && !acknowledgeSent_) {
     publisher_ack_.publish(ack_m);
     ROS_INFO("Acknowledged camera %d image - all data recieved", reading_camera_);
-    acknowledgeSent = true;
+    acknowledgeSent_ = true;
   }
 
 
 }
 
 void PointFilter::ObjectCountCallback(const darknet_ros_msgs::ObjectCountConstPtr& msg) {
+
+  /*
+   * @INFO Load the received object count to the current object count array to the
+   *       the current camera info being read if the image semaphore has been
+   *       incremented by the image callback function (indicating a new image has been
+   *       recieved from darknet and the corresponding detection data must be read).
+   *       If the object count data is new, the image semaphore is decremented to
+   *       indicate that it has now been read.
+   *       If object count was the last data to be recieved for the current image
+   *       (the image semaphore = 0) and the data recieved acknowledgement has not
+   *       been sent already, do so and set the acknowledge sent flag so it will
+   *       not be sent again until a new image is received from darknet.
+   */
+
   if (imageSem_ > 0) {
     objectFoundCountCam_[reading_camera_] = msg->count;
     ROS_INFO("Loaded object found count from camera %d. %d objects found.", reading_camera_, objectFoundCountCam_[reading_camera_]);
     imageSem_ --;
 
-    //if the object found count is zero, darknet does not publish to the bounding box list topic so the Semaphore must be decremented twice here
+    // If the object found count is zero, darknet does not publish to the
+    // bounding box list topic so the Semaphore must be decremented twice here
+
     if (msg->count == 0)
       imageSem_ --;
   }
-  if (imageSem_ == 0 && !acknowledgeSent){
+  if (imageSem_ == 0 && !acknowledgeSent_){
     publisher_ack_.publish(ack_m);
     ROS_INFO("Acknowledged camera %d image - all data recieved", reading_camera_);
-    acknowledgeSent = true;
+    acknowledgeSent_ = true;
   }
 }
 
 void PointFilter::CameraNumberCallback(const std_msgs::Int16 msg) {
+
+  /* @INFO Tells the image, bounding box, and object count callbacks the camera
+   *       for which data will be received from darknet by setting the reading_camera_
+   *       indexer. The message received by this callback is sent by the buffer each
+   *       time it publishes a new image to darknet for processing and is intended to
+   *       tell this node which camera the data provided by darknet is for. It should
+   *       always preceed the detection data for an image since it is sent directly
+   *       from the buffer and bypasses darknet.
+   */
+
   reading_camera_ = msg.data;
   ROS_INFO("Prepared to read camera %d info", reading_camera_);
 }
 
 
-/**************************helper functions**********************************/
+//****************************************************************************//
+//******************************UTILITY FUNCTIONS*****************************//
+//****************************************************************************//
 
 void PointFilter::transformToCameraFrame(const PointCloud::Ptr input_scan, PointCloud::Ptr out_scan,camera_t camera) {
+
+  // Populates the ouput scan arg with the input scan transformed to the requested
+  // camera frame from the LiDAR frame
 
   Eigen::Affine3d transform;
 
@@ -235,6 +339,9 @@ void PointFilter::transformToCameraFrame(const PointCloud::Ptr input_scan, Point
 }
 
 void PointFilter::transformToLidarFrame(const PointCloud::Ptr input_scan, PointCloud::Ptr out_scan,camera_t camera) {
+
+  // Populates the ouput scan arg with the input scan transformed from the requested
+  // camera frame to the LiDAR frame
 
   Eigen::Affine3d transform;
 
@@ -268,11 +375,34 @@ void PointFilter::transformToLidarFrame(const PointCloud::Ptr input_scan, PointC
 
 PointCloud::Ptr PointFilter::filterObjects(PointCloud::Ptr input_scan, camera_t camera) {
 
-  //set camera variables based on camera param
-  uint16_t vmax = imageCam_[(int)camera - 1].rows;
-  uint16_t umax = imageCam_[(int)camera - 1].cols;
-  darknet_ros_msgs::BoundingBoxes bbList = boundingBoxListCam_[(int)camera - 1];
-  uint8_t oFCount = objectFoundCountCam_[(int)camera - 1];
+  /*
+   * @INFO This function performs the actual filtering of the input cloud for
+   *       a specified camera. The sequence of operations is as follows:
+   *       1. Transform the input scan to the reference frame of he camera
+   *          on which it is being filtered
+   *       2. Project each point in the transformed cloud to the camera plane
+   *          Using the Ladybug camera model projection and the intrinsic
+   *          calibration values for the specific camera.
+   *       3. Flag the point if it is behind the camera plane or projects outside
+   *          the image bounds, these points will always be restored to the ouput cloud
+   *       4. If the point projects within the image bounds, check if it falls
+   *          within a bounding box for an object of interest and flag it if it
+   *          does. Also add the point to the list for that bouding box for
+   *          further processing
+   *       5. If the point does not project to a bounding box, push it to the
+   *          filtered cloud
+   *       6. For each bouding box, restore points that fall outside a configurable
+   *          number of std deviations from the mean of all the points in that
+   *          bounding box. This is used to restore background and floor/ceiling
+   *          points where possible
+   */
+
+  // Set camera variables based on camera index
+
+  uint16_t vmax = imageCam_[CAMERA_INDEX(camera)].rows;
+  uint16_t umax = imageCam_[CAMERA_INDEX(camera)].cols;
+  darknet_ros_msgs::BoundingBoxes bbList = boundingBoxListCam_[CAMERA_INDEX(camera)];
+  uint8_t oFCount = objectFoundCountCam_[CAMERA_INDEX(camera)];
   std::vector<beam::Vec2> projectedPoints;
 
   ROS_INFO("Detected %d objects in camera %d image", oFCount, (int)camera-1);
@@ -281,15 +411,14 @@ PointCloud::Ptr PointFilter::filterObjects(PointCloud::Ptr input_scan, camera_t 
   PointCloud::Ptr filteredScanCamera_ = boost::make_shared<PointCloud>();
   PointCloud::Ptr filteredScanLidar_ = boost::make_shared<PointCloud>();
 
-  PointCloud::Ptr filteredScanCameraInv_ = boost::make_shared<PointCloud>();
 
-  //Two dimensional vector of points found in each bounding box
+  // Two dimensional vector of points found in each bounding box
+
   std::vector<std::vector<pcl::PointXYZ>> bbPoints(oFCount,std::vector<pcl::PointXYZ>(0));
 
-  //make a copy of the input scan in the camera frame
-  transformToCameraFrame(input_scan, cameraFrameScan_, camera);
+  // Make a copy of the input scan in the camera frame
 
-  transformToCameraFrame(filteredScanLidarInv_, filteredScanCameraInv_, camera);
+  transformToCameraFrame(input_scan, cameraFrameScan_, camera);
 
   beam::Vec2 coords;
   beam::Vec3 point;
@@ -297,6 +426,8 @@ PointCloud::Ptr PointFilter::filterObjects(PointCloud::Ptr input_scan, camera_t 
 
   bool behind_plane = false;
   bool beyond_plane = false;
+
+  // Iterate through each point in the point cloud
 
   for (uint32_t i = 0; i < cameraFrameScan_->points.size(); i++) {
 
@@ -308,11 +439,13 @@ PointCloud::Ptr PointFilter::filterObjects(PointCloud::Ptr input_scan, camera_t 
     behind_plane = false;
     beyond_plane = false;
 
-    //check that the point is not behind the image plane
+    // Check that the point is not behind the image plane
+
     if (point(2,0) < 0)
       behind_plane = true;
 
-    //project the point to the image plane
+    // Project the point to the image plane
+
     coords = intrinsics_[(int)camera-1]->ProjectPoint(point);
 
     projectedPoints.push_back(coords);
@@ -320,49 +453,125 @@ PointCloud::Ptr PointFilter::filterObjects(PointCloud::Ptr input_scan, camera_t 
     u = std::round(coords(0, 0));
     v = std::round(coords(1, 0));
 
-    //check if the point is beyond the edges of the image
+    // Check if the point is beyond the edges of the image
+
     if (u < 0 || v < 0 || u > umax || v > vmax)
       beyond_plane = true;
 
     bool filterPoint = false;
 
-    //check if the point is within a bounding box
-    for (uint8_t j = 0; j < oFCount; j++) {
+    // Check if the point is within a bounding box (only if it is in the image bounds)
 
-      int xmin = bbList.bounding_boxes[j].xmin;
-      int xmax = bbList.bounding_boxes[j].xmax;
-      int ymin = bbList.bounding_boxes[j].ymin;
-      int ymax = bbList.bounding_boxes[j].ymax;
+    if (behind_plane == false && beyond_plane == false) {
+      for (uint8_t j = 0; j < oFCount; j++) {
 
-      //Only filter if that bounding box describes the bounds of a car or truck
-      if (bbList.bounding_boxes[j].Class == "car" || bbList.bounding_boxes[j].Class == "truck") {
-        if (u > xmin && u < xmax && v > ymin && v < ymax) {
-              filterPoint = true;
-              bbPoints[j].push_back(cameraFrameScan_->points[i]);
+        int xmin = bbList.bounding_boxes[j].xmin;
+        int xmax = bbList.bounding_boxes[j].xmax;
+        int ymin = bbList.bounding_boxes[j].ymin;
+        int ymax = bbList.bounding_boxes[j].ymax;
+
+        // Only filter if that bounding box describes the bounds of a car or truck
+
+        if (bbList.bounding_boxes[j].Class == "car" || bbList.bounding_boxes[j].Class == "truck") {
+          if (u > xmin && u < xmax && v > ymin && v < ymax) {
+                filterPoint = true;
+                bbPoints[j].push_back(cameraFrameScan_->points[i]);
+          }
         }
-      }
 
+      }
     }
 
-      //if the point is not in any bounding boxes, push it to filtered point cloud
+      // If the point is not in any bounding boxes, push it to filtered point cloud
+
       if (!filterPoint || behind_plane || beyond_plane)
         filteredScanCamera_->push_back(cameraFrameScan_->points[i]);
 
-      //if the point is in a bounding box, push it to the inverted point cloud
-      else if (filterPoint)
-        filteredScanCameraInv_->push_back(cameraFrameScan_->points[i]);
   }
 
-  //restore outliers from filtered scan
+  // Restore outliers from filtered scan
+
   restoreOutliers(filteredScanCamera_,oFCount,bbPoints,filterIntensity_);
 
-  //transform the filtered scan in the camera frame back to the lidar frame
-  transformToLidarFrame(filteredScanCamera_, filteredScanLidar_, camera);
+  // Transform the filtered scan in the camera frame back to the lidar frame
 
-  transformToLidarFrame(filteredScanCameraInv_, filteredScanLidarInv_, camera);
+  transformToLidarFrame(filteredScanCamera_, filteredScanLidar_, camera);
 
   return (filteredScanLidar_);
 
+}
+
+bool PointFilter::imageIsEqual(const cv::Mat mat1, const cv::Mat mat2){
+
+  // Compares two image Mats for equality
+
+  ROS_INFO("comparing images.");
+
+   // Treat two empty mat as identical as well
+
+   if (mat1.empty() && mat2.empty()) {
+       return true;
+   }
+   // If dimensionality of two mat is not identical, these two mat are not identical
+
+   if (mat1.cols != mat2.cols || mat1.rows != mat2.rows || mat1.dims != mat2.dims) {
+       return false;
+   }
+   cv::Mat diff, diff_grey;
+   cv::compare(mat1, mat2, diff, cv::CMP_NE);
+   cv::cvtColor(diff, diff_grey, CV_BGR2GRAY);
+   int nz = cv::countNonZero(diff_grey);
+   return nz==0;
+}
+
+void PointFilter::restoreOutliers(PointCloud::Ptr& cloud, uint8_t objectCount, const std::vector<std::vector<pcl::PointXYZ>>& bbPoints, float factor) {
+
+  // For each bounding box, find the mean and standard deviation of z values of the points
+  // therein and push all the outlying points back to the filtered point cloud
+
+  for (uint8_t i = 0; i < objectCount; i++) {
+
+    float meanZ, varianceZ, stdDevZ = 0;
+
+    // Determine the mean value of the z values (in camera frame, z-axis projects
+    // outward orthographically from image plane)
+
+    for (uint16_t j = 0; j < bbPoints[i].size(); j++) {
+      meanZ += bbPoints[i][j].z;
+    }
+    meanZ /= (bbPoints[i].size() != 0 ? bbPoints[i].size() : 1);
+
+    // Determine the variance of the z values
+
+    for (uint16_t k = 0; k < bbPoints[i].size(); k++) {
+      varianceZ += pow(bbPoints[i][k].z - meanZ, 2);
+    }
+    varianceZ /= (bbPoints[i].size() != 0 ? bbPoints[i].size() : 1);
+    stdDevZ = sqrt(varianceZ);
+
+    // Restore any point more than <factor> std dev from the mean in the z axis
+
+    for (uint16_t l = 0; l < bbPoints[i].size(); l++) {
+      if (fabs(bbPoints[i][l].z - meanZ) > fabs(stdDevZ*factor - meanZ))
+        cloud->push_back(bbPoints[i][l]);
+    }
+
+  }
+
+}
+
+//****************************************************************************//
+//*******************************DEBUG FUNCTIONS******************************//
+//****************************************************************************//
+
+
+void PointFilter::visualizer(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, std::string displayName) {
+  pcl::visualization::PCLVisualizer::Ptr viewer (new pcl::visualization::PCLVisualizer (displayName));
+  viewer->setBackgroundColor (0, 0, 0);
+  viewer->addPointCloud (cloud, "sample cloud");
+  viewer->setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "sample cloud");
+  viewer->addCoordinateSystem (1);
+  viewer->spin();
 }
 
 void PointFilter::testProjection(const PointCloud::Ptr cameraFrameScan_, camera_t camera) {
@@ -376,11 +585,13 @@ void PointFilter::testProjection(const PointCloud::Ptr cameraFrameScan_, camera_
     point(1, 0) = cameraFrameScan_->points[i].y;
     point(2, 0) = cameraFrameScan_->points[i].z;
 
-    //check that the point is not behind the image plane
+    // Check that the point is not behind the image plane
+
     if (point(2,0) < 0)
       continue;
 
-    //project the point to the image plane
+    // Project the point to the image plane
+
     coords = intrinsics_[(int)camera-1]->ProjectPoint(point);
 
     u = std::round(coords(0, 0));
@@ -389,68 +600,8 @@ void PointFilter::testProjection(const PointCloud::Ptr cameraFrameScan_, camera_
     ROS_INFO ("The projected U coordinate of point %d is %d in camera %d", i, u, camera);
     ROS_INFO ("The projected V coordinate of point %d is %d in camera %d", i, v, camera);
 
-
   }
 
-}
-
-bool PointFilter::imageIsEqual(const cv::Mat mat1, const cv::Mat mat2){
-
-  ROS_INFO("comparing images.");
-
-   // treat two empty mat as identical as well
-   if (mat1.empty() && mat2.empty()) {
-       return true;
-   }
-   // if dimensionality of two mat is not identical, these two mat are not identical
-   if (mat1.cols != mat2.cols || mat1.rows != mat2.rows || mat1.dims != mat2.dims) {
-       return false;
-   }
-   cv::Mat diff, diff_grey;
-   cv::compare(mat1, mat2, diff, cv::CMP_NE);
-   cv::cvtColor(diff, diff_grey, CV_BGR2GRAY);
-   int nz = cv::countNonZero(diff_grey);
-   return nz==0;
-}
-
-void PointFilter::restoreOutliers(PointCloud::Ptr& cloud, uint8_t objectCount, const std::vector<std::vector<pcl::PointXYZ>>& bbPoints, float factor) {
-
-  //for each bounding box, find the mean and standard deviation of z values of the points therein and push all the outlying points back to the filtered point cloud
-  for (uint8_t i = 0; i < objectCount; i++) {
-
-    float meanZ, varianceZ, stdDevZ = 0;
-
-    //determine the mean value of the z values
-    for (uint16_t j = 0; j < bbPoints[i].size(); j++) {
-      meanZ += bbPoints[i][j].z;
-    }
-    meanZ /= (bbPoints[i].size() != 0 ? bbPoints[i].size() : 1);
-
-    //determine the variance of the z values
-    for (uint16_t k = 0; k < bbPoints[i].size(); k++) {
-      varianceZ += pow(bbPoints[i][k].z - meanZ, 2);
-    }
-    varianceZ /= (bbPoints[i].size() != 0 ? bbPoints[i].size() : 1);
-    stdDevZ = sqrt(varianceZ);
-
-    //restore any point more than 1 std dev from the mean in the z axis
-    for (uint16_t l = 0; l < bbPoints[i].size(); l++) {
-      if (fabs(bbPoints[i][l].z - meanZ) > fabs(stdDevZ*factor - meanZ))
-        cloud->push_back(bbPoints[i][l]);
-    }
-
-  }
-
-}
-
-//test function to visualize point clouds
-void PointFilter::visualizer(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, std::string displayName) {
-  pcl::visualization::PCLVisualizer::Ptr viewer (new pcl::visualization::PCLVisualizer (displayName));
-  viewer->setBackgroundColor (0, 0, 0);
-  viewer->addPointCloud (cloud, "sample cloud");
-  viewer->setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "sample cloud");
-  viewer->addCoordinateSystem (1);
-  viewer->spin();
 }
 
 void PointFilter::displayProjectionImage(camera_t camera, const cv::Mat image, std::vector<beam::Vec2> projectedPoints) {
@@ -460,7 +611,7 @@ void PointFilter::displayProjectionImage(camera_t camera, const cv::Mat image, s
   int u = 0;
   int v = 0;
 
-  darknet_ros_msgs::BoundingBoxes bbList = boundingBoxListCam_[(int)camera - 1];
+  darknet_ros_msgs::BoundingBoxes bbList = boundingBoxListCam_[CAMERA_INDEX(camera)];
 
   std::string name = "/home/evan/test_images/projections/camera" + std::to_string((int)camera-1) + ".jpeg";
 
@@ -470,7 +621,7 @@ void PointFilter::displayProjectionImage(camera_t camera, const cv::Mat image, s
     cv::circle(local_image, cv::Point(u, v),3,black);
   }
 
-  for(int i = 0; i < objectFoundCountCam_[(int)camera - 1]; i++) {
+  for(int i = 0; i < objectFoundCountCam_[CAMERA_INDEX(camera)]; i++) {
 
     int xmin = bbList.bounding_boxes[i].xmin;
     int xmax = bbList.bounding_boxes[i].xmax;
@@ -485,7 +636,6 @@ void PointFilter::displayProjectionImage(camera_t camera, const cv::Mat image, s
     }
   }
 
-  //cv::imshow(std::to_string((int)camera), local_image);
   cv::imwrite(name, local_image);
   cv::waitKey(10);
 
