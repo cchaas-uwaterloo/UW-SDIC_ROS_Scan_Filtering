@@ -1,6 +1,7 @@
 # Point_filter Package
 
-![Alt Text](/Car_Scan_Filtering_Cut_Small.gif)
+![Alt Text](/Car_Scan_Filtering_Cut_Small.gif =250x)
+
 (orange points corresponding to vehicle filtered)
 
 ## Overview
