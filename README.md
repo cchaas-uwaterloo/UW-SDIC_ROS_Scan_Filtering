@@ -1,5 +1,8 @@
 # Point_filter Package
 
+<img src="/Car_Scan_Filtering_Cut_Small.gif" alt="Gif"
+	title="filtering" width="150" height="100" />
+
 ![Alt Text](/Car_Scan_Filtering_Cut_Small.gif | =250x)
 
 (orange points corresponding to vehicle filtered)
