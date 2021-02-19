@@ -1,6 +1,7 @@
 # Point_filter Package
 
 ![Alt Text](/Car_Scan_Filtering_Cut_Small.gif)
+(orange points corresponding to vehicle filtered)
 
 ## Overview
 This package provides a set of tools to filter vehicles and other unwanted objects from 3D LiDAR scans using computer vision. Intended use is for post processing of scans collected during infrastructure inspections. As it is currently configured, this package can provide filtering functionality for robot configurations with one LiDAR scanner and a six camera ladybug camera system. Limited development would be required to reconfigure the package for different sensor configurations.
